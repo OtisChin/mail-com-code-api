@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloudflare Quick Tunnel for mail.com verification API
+After=network-online.target mail-com-code-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mailcode
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8788
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

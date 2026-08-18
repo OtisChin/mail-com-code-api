@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mail Code Console</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand-mark">M</div>
+    <div>
+      <div class="eyebrow">MAIL.COM</div>
+      <h1>接码控制台</h1>
+    </div>
+    <div class="top-actions">
+      <span id="health-badge" class="badge pending">检查中</span>
+      <a href="/health" target="_blank" rel="noreferrer">API 健康</a>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="hero-row">
+      <div>
+        <span class="section-kicker">MAILBOX OPERATIONS</span>
+        <h2>账号与接码地址</h2>
+        <p class="muted">导入邮箱密码后，系统会加密保存凭据，并为每个收件地址生成独立的接码 URL。</p>
+      </div>
+      <div class="metric"><span id="account-count">0</span><small>账号</small></div>
+      <div class="metric"><span id="route-count">0</span><small>地址</small></div>
+    </section>
+
+    <section class="work-grid">
+      <div class="panel import-panel">
+        <div class="panel-head">
+          <div><span class="section-kicker">01 / IMPORT</span><h3>导入邮箱账号</h3></div>
+          <span class="format-chip">邮箱----密码</span>
+        </div>
+        <textarea id="credentials" spellcheck="false" placeholder="first@mail.com----password&#10;second@mail.com----password"></textarea>
+        <div class="check-row import-options">
+          <label><input id="verify" type="checkbox" checked> 导入后立即验证 mail.com 登录</label>
+          <label><input id="use-proxy" type="checkbox"> 使用代理</label>
+          <label>每个账号分裂 <select id="import-split-count" aria-label="每个账号分裂数量"><option value="0">不分裂</option><option value="1">1 个</option><option value="2">2 个</option><option value="3">3 个</option><option value="4">4 个</option><option value="5">5 个</option><option value="6">6 个</option><option value="7">7 个</option><option value="8">8 个</option><option value="9">9 个</option></select></label>
+          <label>指定域名 <input id="import-split-domain" type="text" placeholder="engineer.com, comic.com" aria-label="指定分裂域名（可选，可输入多个）"></label>
+          <label><input id="random-com-domain" type="checkbox"> 随机 .com 域名</label>
+          <label><input id="random-net-domain" type="checkbox"> 随机 .net 域名</label>
+        </div>
+        <div class="inline-actions">
+          <button id="import" class="button primary">保存并导入</button>
+          <span id="import-status" class="muted"></span>
+        </div>
+        <div id="import-result-block" class="result-block" hidden>
+          <div class="result-head"><strong>邮箱----接码API</strong><button id="copy-result" class="copy">复制全部</button></div>
+          <textarea id="import-result" readonly></textarea>
+        </div>
+      </div>
+
+      <div class="panel quick-panel">
+        <div class="panel-head">
+          <div><span class="section-kicker">02 / EXPORT</span><h3>地址文件</h3></div>
+          <button id="export" class="icon-button" title="下载邮箱----接码API文件" aria-label="下载地址文件">⇩</button>
+        </div>
+        <div class="export-preview"><code>邮箱----https://.../code/&lt;access_key&gt;</code></div>
+        <p class="muted">导出文件由服务端持久化生成，可直接交给下游调用方。</p>
+        <button id="refresh" class="button secondary">刷新账号状态</button>
+      </div>
+    </section>
+
+    <section class="panel query-panel">
+      <div class="panel-head">
+        <div><span class="section-kicker">02 / QUERY</span><h3>按邮箱批量查询验证码</h3></div>
+        <span class="format-chip">自动匹配已保存地址</span>
+      </div>
+      <textarea id="query-emails" class="query-input" spellcheck="false" placeholder="输入邮箱，每行一个；也支持逗号分隔"></textarea>
+      <div class="inline-actions">
+        <label class="query-option">最大邮件年龄 <input id="max-age" type="number" min="0" value="600"> 秒</label>
+        <button id="query" class="button primary">批量查询</button>
+        <span id="query-status" class="muted"></span>
+      </div>
+      <div class="query-results-wrap"><table class="query-results"><thead><tr><th>邮箱</th><th>验证码</th><th>主题</th><th>状态</th></tr></thead><tbody id="query-results"><tr><td colspan="4" class="empty">输入邮箱后查询</td></tr></tbody></table></div>
+    </section>
+
+    <section class="panel proxy-panel">
+      <div class="panel-head">
+        <div><span class="section-kicker">03 / PROXY</span><h3>代理池</h3></div>
+        <span id="proxy-pool-status" class="muted">未配置代理池</span>
+      </div>
+      <div class="proxy-grid">
+        <div class="proxy-actions">
+          <button id="save-proxy-pool" class="button primary">保存代理池</button>
+        </div>
+        <textarea id="proxy-pool-input" class="query-input" spellcheck="false" placeholder="http://proxy-user:proxy-pass@proxy.example:8080&#10;host:port:user:pass&#10;# 每行一个代理"></textarea>
+        <p class="muted">保存后会写入服务器上的代理池文件，并用于后续新账号分配。</p>
+      </div>
+    </section>
+
+    <section class="table-section">
+      <div class="table-head">
+        <div><span class="section-kicker">04 / ROUTES</span><h3>接码地址</h3></div>
+        <div class="inline-actions">
+          <span id="table-status" class="muted">尚未连接</span>
+          <button id="clear-routes" class="button ghost">清空</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>邮箱</th><th>密码</th><th>分裂状态</th><th>接码API</th><th>操作</th></tr></thead>
+          <tbody id="accounts"><tr><td colspan="5" class="empty">导入账号后显示地址</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
+

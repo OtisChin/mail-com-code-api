@@ -1,0 +1,23 @@
+[Unit]
+Description=mail.com verification code API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mailcode
+Group=mailcode
+WorkingDirectory=/opt/mail-com-code-api
+EnvironmentFile=/etc/mail-com-code-api.env
+ExecStart=/opt/mail-com-code-api/.venv/bin/python /opt/mail-com-code-api/server.py
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/mail-com-code-api
+
+[Install]
+WantedBy=multi-user.target
+
