@@ -166,6 +166,49 @@ function routeForEmail(email) {
   return null;
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function routeAddresses(lines) {
+  return new Set(lines.map(lineToRoute).filter(Boolean).map(route => route.address.toLowerCase()));
+}
+
+async function fetchAccountRoutes(account) {
+  const result = await request('/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({email: account.email, password: account.password}),
+  });
+  return (result.routes || []).map(route => ({
+    address: String(route.address || '').toLowerCase(),
+    url: String(route.url || ''),
+  })).filter(route => route.address && route.url);
+}
+
+async function recoverRoutesAfterUncertainSplit(account, outputLines, attempts = 6) {
+  const knownAccountRoutes = new Set(account.addresses.map(route => route.address.toLowerCase()));
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    if (attempt > 1) await sleep(5000);
+    const routes = await fetchAccountRoutes(account);
+    const outputAddresses = routeAddresses(outputLines);
+    const recoveredRoutes = [];
+    for (const route of routes) {
+      if (!knownAccountRoutes.has(route.address)) {
+        account.addresses.push(route);
+        knownAccountRoutes.add(route.address);
+      }
+      if (!outputAddresses.has(route.address)) {
+        outputLines.push(`${route.address}----${route.url}`);
+        outputAddresses.add(route.address);
+        recoveredRoutes.push(route);
+      }
+    }
+    if (recoveredRoutes.length) return recoveredRoutes;
+  }
+  return [];
+}
+
 async function checkHealth() {
   try {
     const result = await request('/health');
@@ -283,10 +326,38 @@ document.querySelector('#import').addEventListener('click', async () => {
           job.created = splitRoutes.length;
           outputLines = outputLines.concat(splitRoutes.map(route => `${route.address}----${route.url}`));
         } catch (error) {
-          account.status = `分裂失败: ${error.message}`;
-          job.status = '失败';
-          job.error = error.message;
-          splitErrors.push(`${account.email}: ${error.message}`);
+          const uncertain = /HTTP 504|上限|alias_limit|timeout|timed out/i.test(error.message);
+          if (uncertain) {
+            job.status = '运行中';
+            job.error = '请求超时，正在回捞已生成地址...';
+            account.status = '请求超时，正在回捞';
+            status.textContent = `${account.email} 请求超时，正在回捞已生成地址...`;
+            renderSplitProgress(splitJobs);
+            try {
+              const recoveredRoutes = await recoverRoutesAfterUncertainSplit(account, outputLines);
+              if (recoveredRoutes.length) {
+                account.status = `分裂成功 ${recoveredRoutes.length} 个（超时后回捞）`;
+                job.status = '成功';
+                job.created = recoveredRoutes.length;
+                job.error = '';
+              } else {
+                account.status = `分裂失败: ${error.message}`;
+                job.status = '失败';
+                job.error = `${error.message}；回捞未发现新地址`;
+                splitErrors.push(`${account.email}: ${job.error}`);
+              }
+            } catch (recoverError) {
+              account.status = `分裂失败: ${error.message}`;
+              job.status = '失败';
+              job.error = `${error.message}；回捞失败：${recoverError.message}`;
+              splitErrors.push(`${account.email}: ${job.error}`);
+            }
+          } else {
+            account.status = `分裂失败: ${error.message}`;
+            job.status = '失败';
+            job.error = error.message;
+            splitErrors.push(`${account.email}: ${error.message}`);
+          }
         }
         const processed = index + 1;
         const splitCreatedNow = outputLines.length - (result.lines || []).length;

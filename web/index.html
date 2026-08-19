@@ -50,10 +50,6 @@
           <span id="import-status" class="muted"></span>
         </div>
         <div id="split-progress" class="split-progress" hidden></div>
-        <div id="import-result-block" class="result-block" hidden>
-          <div class="result-head"><strong>邮箱----接码API</strong><button id="copy-result" class="copy">复制全部</button></div>
-          <textarea id="import-result" readonly></textarea>
-        </div>
       </div>
 
       <div class="panel quick-panel">
@@ -63,6 +59,10 @@
         </div>
         <div class="export-preview"><code>邮箱----https://.../code/&lt;access_key&gt;</code></div>
         <p class="muted">导出文件由服务端持久化生成，可直接交给下游调用方。</p>
+        <div id="import-result-block" class="result-block result-block-side" hidden>
+          <div class="result-head"><strong>邮箱----接码API</strong><button id="copy-result" class="copy">复制全部</button></div>
+          <textarea id="import-result" readonly></textarea>
+        </div>
         <button id="refresh" class="button secondary">刷新账号状态</button>
       </div>
     </section>
