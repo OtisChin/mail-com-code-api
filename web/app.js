@@ -5,6 +5,9 @@ const routesStorageKey = 'mail-code-routes';
 let savedAccounts = readSavedAccounts();
 const proxyPoolInput = document.querySelector('#proxy-pool-input');
 const proxyPoolStatus = document.querySelector('#proxy-pool-status');
+const splitProgress = document.querySelector('#split-progress');
+let healthPollingTimer = null;
+let healthPollingInFlight = false;
 
 function notify(message, error = false) {
   toast.textContent = message;
@@ -85,6 +88,48 @@ function statusClass(value) {
   return value === '已验证' || value.startsWith('分裂成功') ? 'ready' : value.startsWith('分裂失败') ? 'bad' : '';
 }
 
+function splitProgressClass(job) {
+  if (job.status === '成功') return 'ready';
+  if (job.status === '失败') return 'bad';
+  if (job.status === '运行中') return 'pending';
+  return '';
+}
+
+function renderSplitProgress(jobs = []) {
+  if (!splitProgress) return;
+  if (!jobs.length) {
+    splitProgress.hidden = true;
+    splitProgress.innerHTML = '';
+    return;
+  }
+  const done = jobs.filter(job => job.status === '成功' || job.status === '失败').length;
+  const success = jobs.filter(job => job.status === '成功').length;
+  const failed = jobs.filter(job => job.status === '失败').length;
+  const created = jobs.reduce((sum, job) => sum + (job.created || 0), 0);
+  splitProgress.hidden = false;
+  splitProgress.innerHTML = `
+    <div class="split-progress-head">
+      <strong>分裂进度 ${done}/${jobs.length}</strong>
+      <span class="muted">成功账号 ${success} 个，失败账号 ${failed} 个，已生成 ${created} 个地址</span>
+    </div>
+    <div class="split-progress-list">
+      ${jobs.map((job, index) => `
+        <div class="split-progress-row">
+          <span class="split-progress-index">${index + 1}</span>
+          <span class="split-progress-email">${escapeHtml(job.email)}</span>
+          <span class="status ${splitProgressClass(job)}">${escapeHtml(job.status)}</span>
+          <span class="split-progress-detail">${
+            job.status === '成功'
+              ? `生成 ${job.created || 0} 个`
+              : job.error
+                ? escapeHtml(job.error)
+                : ''
+          }</span>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
 function renderAccounts(accounts) {
   const rows = accounts.flatMap(account => account.addresses.length ? account.addresses.map(route => ({account, route})) : [{account, route: null}]);
   document.querySelector('#account-count').textContent = accounts.length;
@@ -141,6 +186,30 @@ async function checkHealth() {
   }
 }
 
+async function pollHealthOnce() {
+  if (healthPollingInFlight) return;
+  healthPollingInFlight = true;
+  try {
+    await checkHealth();
+  } finally {
+    healthPollingInFlight = false;
+  }
+}
+
+function startHealthPolling() {
+  if (healthPollingTimer) return;
+  if (proxyPoolStatus) proxyPoolStatus.classList.add('live');
+  pollHealthOnce();
+  healthPollingTimer = setInterval(pollHealthOnce, 2000);
+}
+
+function stopHealthPolling() {
+  if (!healthPollingTimer) return;
+  clearInterval(healthPollingTimer);
+  healthPollingTimer = null;
+  if (proxyPoolStatus) proxyPoolStatus.classList.remove('live');
+}
+
 document.querySelector('#refresh').addEventListener('click', () => {
   savedAccounts = readSavedAccounts();
   renderAccounts(savedAccounts);
@@ -161,6 +230,8 @@ document.querySelector('#import').addEventListener('click', async () => {
   ].filter(Boolean);
   const status = document.querySelector('#import-status');
   status.textContent = '保存并验证中...';
+  renderSplitProgress([]);
+  startHealthPolling();
   try {
     const result = await request(`/admin/import?verify=${verify}&use_proxy=${useProxy}`, {method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body:credentials});
     const resultByEmail = new Map((result.results || []).map(item => [item.email, item]));
@@ -178,7 +249,21 @@ document.querySelector('#import').addEventListener('click', async () => {
     const splitErrors = [];
     if (splitCount > 0) {
       status.textContent = `已导入，正在批量分裂 ${freshAccounts.length} 个账号...`;
-      for (const account of freshAccounts) {
+      const splitJobs = freshAccounts.map(account => ({
+        email: account.email,
+        status: '等待中',
+        created: 0,
+        error: '',
+      }));
+      renderSplitProgress(splitJobs);
+      for (const [index, account] of freshAccounts.entries()) {
+        const job = splitJobs[index];
+        const splitCreatedSoFar = outputLines.length - (result.lines || []).length;
+        job.status = '运行中';
+        account.status = `正在分裂 ${index + 1}/${freshAccounts.length}`;
+        status.textContent = `正在分裂 ${index + 1}/${freshAccounts.length}：${account.email}，已生成 ${splitCreatedSoFar} 个，失败 ${splitErrors.length} 个`;
+        renderSplitProgress(splitJobs);
+        renderAccounts(mergeAccounts(savedAccounts, freshAccounts));
         try {
           const split = await request('/aliases/split', {
             method: 'POST',
@@ -194,25 +279,36 @@ document.querySelector('#import').addEventListener('click', async () => {
           const splitRoutes = (split.routes || []).map(route => ({address: route.address, url: route.url}));
           account.addresses.push(...splitRoutes);
           account.status = `分裂成功 ${splitRoutes.length} 个`;
+          job.status = '成功';
+          job.created = splitRoutes.length;
           outputLines = outputLines.concat(splitRoutes.map(route => `${route.address}----${route.url}`));
         } catch (error) {
           account.status = `分裂失败: ${error.message}`;
+          job.status = '失败';
+          job.error = error.message;
           splitErrors.push(`${account.email}: ${error.message}`);
         }
+        const processed = index + 1;
+        const splitCreatedNow = outputLines.length - (result.lines || []).length;
+        status.textContent = `分裂进度 ${processed}/${freshAccounts.length}，已生成 ${splitCreatedNow} 个，失败 ${splitErrors.length} 个`;
+        renderSplitProgress(splitJobs);
+        renderAccounts(mergeAccounts(savedAccounts, freshAccounts));
       }
     }
     saveAccounts(mergeAccounts(savedAccounts, freshAccounts));
     document.querySelector('#import-result').value = outputLines.join('\n');
     document.querySelector('#import-result-block').hidden = false;
     renderAccounts(savedAccounts);
-    document.querySelector('#credentials').value = '';
     const splitCreated = outputLines.length - (result.lines || []).length;
-    const firstSplitError = splitErrors[0] || '';
-    status.textContent = `已保存 ${result.imported} 个账号${splitCount ? `，分裂完成 ${splitCreated} 个${firstSplitError ? `，失败：${firstSplitError}` : ''}` : ''}`;
+    const failureSummary = splitErrors.length ? `，失败 ${splitErrors.length} 个账号：${splitErrors.join('；')}` : '';
+    status.textContent = `已保存 ${result.imported} 个账号${splitCount ? `，分裂完成 ${splitCreated} 个${failureSummary}` : ''}`;
     notify(splitErrors.length ? `导入完成，有 ${splitErrors.length} 个账号分裂失败` : `导入完成：${result.imported} 个账号`);
   } catch (error) {
     status.textContent = error.message;
     notify(error.message, true);
+  } finally {
+    stopHealthPolling();
+    await checkHealth();
   }
 });
 
